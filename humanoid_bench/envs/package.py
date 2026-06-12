@@ -3,8 +3,6 @@ import gymnasium as gym
 from gymnasium.spaces import Box
 from dm_control.utils import rewards
 
-from humanoid_bench.mjx.flax_to_torch import TorchModel, TorchPolicy
-
 import mujoco
 
 from humanoid_bench.tasks import Task

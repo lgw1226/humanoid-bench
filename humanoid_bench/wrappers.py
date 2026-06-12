@@ -2,7 +2,6 @@ from gymnasium.spaces import Box, Dict
 import numpy as np
 import mujoco
 
-from humanoid_bench.mjx.flax_to_torch import TorchModel, TorchPolicy
 from humanoid_bench.tasks import Task
 # from humanoid_bench.env import HumanoidEnv
 
@@ -102,6 +101,7 @@ class SingleReachWrapper(BaseWrapper):
 
         self.max_delta = max_delta
 
+        from humanoid_bench.mjx.flax_to_torch import TorchModel, TorchPolicy
         reaching_model = TorchModel(55, 19)
         self.reaching_policy = TorchPolicy(reaching_model)
         self.reaching_policy.load(policy_path, mean=mean_path, var=var_path)
@@ -228,6 +228,7 @@ class DoubleReachBaseWrapper(BaseWrapper):
         self.max_delta = max_delta
         self.max_delta_coords = max_delta_coords
 
+        from humanoid_bench.mjx.flax_to_torch import TorchModel, TorchPolicy
         reaching_model = TorchModel(61, 19)
         self.reaching_policy = TorchPolicy(reaching_model)
         self.reaching_policy.load(policy_path, mean=mean_path, var=var_path)
