@@ -190,6 +190,12 @@ def main(cfg: DictConfig):
         env, eval_env = myosuite_wrappers.make_env(cfg)
         cfg.critic.max_val = 3600.0
         cfg.critic.min_val = -3600.0
+    elif cfg.env_id.startswith("h1"):
+        import flag.utils.wrappers.mujoco as mujoco_wrappers
+
+        env, eval_env = mujoco_wrappers.make_env(cfg)
+        cfg.critic.max_val = 200.0
+        cfg.critic.min_val = -200.0
     else:
         import flag.utils.wrappers.mujoco as mujoco_wrappers
 

@@ -6,7 +6,7 @@ num_train_action_samples: 8
 num_eval_action_samples: 32
 min_logstd: -20.0
 max_logstd: 0.0
-init_logstd: -2.0
+init_logstd: -1.0
 logstd_mode: fixed
 
 mean_network_config:

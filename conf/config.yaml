@@ -9,9 +9,9 @@ seed: 42
 
 # environment parameters
 env_id: null
-normalize_env: true
+normalize_env: false
 normalize_obs: true
-normalize_reward: true
+normalize_reward: false
 normalize_reward_eval: false
 normalize_gamma: ${discount}
 normalize_clip_obs: 10.0
@@ -60,3 +60,4 @@ wandb:
   entity: ICML2026
   project: flag-humanoid-bench
   mode: online
+  name: ${env_id}-seed${seed}
