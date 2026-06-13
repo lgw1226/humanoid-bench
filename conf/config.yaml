@@ -60,4 +60,4 @@ wandb:
   entity: ICML2026
   project: flag-humanoid-bench
   mode: online
-  name: ${env_id}-seed${seed}
+  name: ${env_id}-seed${seed}-actorLN${actor.mean_network_config.use_layer_norm}

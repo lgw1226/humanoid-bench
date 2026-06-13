@@ -12,5 +12,6 @@ logstd_mode: fixed
 mean_network_config:
   _target_: flag.utils.nn.MLPConfig
   hidden_features: [256, 256, 256]
+  use_layer_norm: true  # match reference FlowPolicy (hidden LayerNorm); replaces need for env obs-norm
 logstd_network_config:
   _target_: flag.utils.nn.MLPConfig
