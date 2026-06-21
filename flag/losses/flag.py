@@ -58,7 +58,7 @@ def flag_actor_loss_fn(
     obs_flat = obs_repeated.reshape(-1, O)
     act_flat = act[:, : S + 1].reshape(-1, A)
 
-    q = jnp.mean(critic(obs_flat, act_flat, use_target=False), axis=0)
+    q = jnp.min(critic(obs_flat, act_flat, use_target=False), axis=0)
 
     q = q.reshape(B, S + 1, 1)
     q_sg = sg(q)

@@ -113,18 +113,24 @@ def make_env(cfg):
         )
 
 
-    base_env = gym.make(cfg.env_id)
+    base_env = gym.make(cfg.env_id, render_mode=None)
     train_env = JAXEnvWrapper(base_env, cfg.seed)
-
 
     vector_eval_env = gym.make_vec(
         cfg.env_id,
         num_envs=cfg.eval_episodes,
-        vectorization_mode="sync"
+        vectorization_mode="sync",
+        render_mode=None,
     )
     eval_env = JAXVectorEnvWrapper(vector_eval_env)
 
     return train_env, eval_env
+
+
+def make_video_env(cfg):
+    """Single-env with rendering enabled; used only when save_video=true."""
+    base_env = gym.make(cfg.env_id, render_mode="rgb_array")
+    return JAXEnvWrapper(base_env, cfg.seed)
 
 
 if __name__ == "__main__":

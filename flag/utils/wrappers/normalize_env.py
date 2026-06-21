@@ -90,10 +90,10 @@ class NormalizeJAXEnvWrapper:
         obs, info = self.env.reset(key)
         self._returns = 0.0
 
+        # Update running statistics from RAW obs but return RAW obs.
+        # Normalization with current statistics happens at use-time (SB3-style).
         if self.norm_obs and self.training:
             self.normalizer.obs_rms.update(np.asarray(obs)[None])
-        if self.norm_obs:
-            obs = self._normalize_obs(obs)
 
         return obs, info
 
@@ -118,19 +118,21 @@ class NormalizeJAXEnvWrapper:
 
         if self.norm_obs and self.training:
             self.normalizer.obs_rms.update(np.asarray(next_obs)[None])
-        if self.norm_obs:
-            next_obs = self._normalize_obs(next_obs)
 
         info = dict(info)
         info["raw_reward"] = raw_reward
         return next_obs, reward, terminated, truncated, info
 
-    def _normalize_obs(self, obs: np.ndarray) -> np.ndarray:
+    def normalize_obs(self, obs: np.ndarray) -> np.ndarray:
+        """Normalize raw obs with the CURRENT running statistics (no update)."""
         obs = np.asarray(obs, dtype=np.float32)
         mean = self.normalizer.obs_rms.mean.astype(np.float32)
         var = self.normalizer.obs_rms.var.astype(np.float32)
         obs = (obs - mean) / np.sqrt(np.maximum(var, 0.0) + self.normalizer.epsilon)
         return np.clip(obs, -self.clip_obs, self.clip_obs)
+
+    def render(self):
+        return self.env.render()
 
 
 class NormalizeJAXVectorEnvWrapper:
@@ -164,8 +166,6 @@ class NormalizeJAXVectorEnvWrapper:
 
         if self.norm_obs and self.training:
             self.normalizer.obs_rms.update(np.asarray(obs))
-        if self.norm_obs:
-            obs = self._normalize_obs(obs)
 
         return obs, infos
 
@@ -193,14 +193,13 @@ class NormalizeJAXVectorEnvWrapper:
 
         if self.norm_obs and self.training:
             self.normalizer.obs_rms.update(np.asarray(next_obs))
-        if self.norm_obs:
-            next_obs = self._normalize_obs(next_obs)
 
         infos = dict(infos)
         infos["raw_reward"] = raw_rewards
         return next_obs, rewards, terminateds, truncateds, infos
 
-    def _normalize_obs(self, obs: np.ndarray) -> np.ndarray:
+    def normalize_obs(self, obs: np.ndarray) -> np.ndarray:
+        """Normalize raw obs with the CURRENT running statistics (no update)."""
         obs = np.asarray(obs, dtype=np.float32)
         mean = self.normalizer.obs_rms.mean.astype(np.float32)
         var = self.normalizer.obs_rms.var.astype(np.float32)

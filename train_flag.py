@@ -52,6 +52,7 @@ def evaluate(
     policy: Callable[[Array], Array],
     num_episodes: int,
     key: Array,
+    obs_transform: Callable[[Any], Any] | None = None,
 ) -> dict[str, float]:
     total_steps = 0
     total_reward = 0.0
@@ -60,7 +61,8 @@ def evaluate(
         obs, info = env.reset(eval_key)
         done = False
         while not done:
-            action = policy(observation=obs)
+            norm_obs = obs if obs_transform is None else obs_transform(obs)
+            action = policy(observation=norm_obs)
             obs, reward, terminated, truncated, info = env.step(action)
             total_steps += 1
             total_reward += reward
@@ -77,6 +79,7 @@ def evaluate_vectorized_env(
     vec_env: Any,
     policy: Callable[[Array], Array],
     key: Array,
+    obs_transform: Callable[[Any], Any] | None = None,
 ) -> dict[str, float]:
     obs, info = vec_env.reset(key)
 
@@ -92,7 +95,8 @@ def evaluate_vectorized_env(
 
     while not np.all(finished_mask):
 
-        action = policy(observation=obs)
+        norm_obs = obs if obs_transform is None else obs_transform(obs)
+        action = policy(observation=norm_obs)
 
         next_obs, rewards, terminateds, truncateds, infos = vec_env.step(action)
 
@@ -147,7 +151,7 @@ def evaluate_policy(actor: FlagActor, critic: Union[ScalarCritic, Distributional
             q = sg(critic(obs_repeated, actions, use_target=True)).squeeze(-1)
         else:
             q = sg(critic(obs_repeated, actions, use_target=False)).squeeze(-1)
-        q = jnp.mean(q, axis=0)
+        q = jnp.min(q, axis=0)
         best_sample_idx = jnp.argmax(q)
         return actions[best_sample_idx]
     else:
@@ -164,11 +168,41 @@ def evaluate_policy(actor: FlagActor, critic: Union[ScalarCritic, Distributional
                 q = sg(critic(obs_repeated, actions_i, use_target=True)).squeeze(-1)
             else:
                 q = sg(critic(obs_repeated, actions_i, use_target=False)).squeeze(-1)
-            q = jnp.mean(q, axis=0)
+            q = jnp.min(q, axis=0)
             best_sample_idx = jnp.argmax(q)
             best_actions.append(actions_i[best_sample_idx])
 
         return jnp.stack(best_actions)
+
+
+def record_video(
+    video_env: Any,
+    policy: Callable[[Array], Array],
+    key: Array,
+    obs_transform: Callable[[Any], Any] | None = None,
+) -> tuple[np.ndarray, float, int]:
+    frames = []
+    key, reset_key = jax.random.split(key)
+    obs, _info = video_env.reset(reset_key)
+    done = False
+    episode_return = 0.0
+    episode_length = 0
+
+    while not done:
+        frame = video_env.render()
+        if frame is not None:
+            frames.append(frame)
+        norm_obs = obs if obs_transform is None else obs_transform(obs)
+        action = policy(observation=norm_obs)
+        obs, reward, terminated, truncated, _info = video_env.step(action)
+        episode_return += float(reward)
+        episode_length += 1
+        done = terminated or truncated
+
+    if not frames:
+        raise RuntimeError("No frames captured; ensure video env uses render_mode='rgb_array'.")
+
+    return np.stack(frames), episode_return, episode_length
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
@@ -178,6 +212,7 @@ def main(cfg: DictConfig):
     random.seed(cfg.seed)
     np.random.seed(cfg.seed)
 
+    mujoco_wrappers = None
     if cfg.env_id.startswith("dm_control/"):
         import flag.utils.wrappers.dmcontrol as dmcontrol_wrappers
 
@@ -203,7 +238,20 @@ def main(cfg: DictConfig):
         cfg.critic.max_val = 1600.0
         cfg.critic.min_val = -1600.0
 
-    if cfg.normalize_env:
+    video_env = None
+    if cfg.save_video:
+        if mujoco_wrappers is None:
+            raise ValueError(f"save_video is not supported for env_id={cfg.env_id}")
+        video_env = mujoco_wrappers.make_video_env(cfg)
+
+    # Obs/reward normalization share a single running-statistics Normalizer.
+    # The wrappers update statistics from RAW obs and return RAW obs; obs are
+    # normalized with the CURRENT statistics at use-time (SB3-style), so the
+    # replay buffer always stores raw obs.
+    obs_transform = None
+    eval_obs_transform = None
+    video_obs_transform = None
+    if cfg.normalize_obs or cfg.normalize_reward:
         if cfg.normalize_reward:
             cfg.critic.max_val = float(cfg.normalize_g_max)
             cfg.critic.min_val = -float(cfg.normalize_g_max)
@@ -234,6 +282,23 @@ def main(cfg: DictConfig):
             clip_obs=float(cfg.normalize_clip_obs),
             clip_reward=float(cfg.normalize_clip_reward),
         )
+
+        if cfg.normalize_obs:
+            obs_transform = env.normalize_obs
+            eval_obs_transform = eval_env.normalize_obs
+
+        if video_env is not None:
+            video_env = NormalizeJAXEnvWrapper(
+                video_env,
+                normalizer=normalizer,
+                training=False,
+                norm_obs=bool(cfg.normalize_obs),
+                norm_reward=bool(cfg.normalize_reward_eval),
+                clip_obs=float(cfg.normalize_clip_obs),
+                clip_reward=float(cfg.normalize_clip_reward),
+            )
+            if cfg.normalize_obs:
+                video_obs_transform = video_env.normalize_obs
     seed = cfg.seed
     key = jax.random.key(seed)
     key, actor_key, critic_key = jax.random.split(key, 3)
@@ -342,11 +407,13 @@ def main(cfg: DictConfig):
             key, exploration_key = jax.random.split(key)
             act = env.sample_random_action(exploration_key)
         else:
-            act = train_policy(actor, obs)
+            norm_obs = obs if obs_transform is None else obs_transform(obs)
+            act = train_policy(actor, norm_obs)
 
         act_np = np.array(act)
         next_obs, reward, terminated, truncated, info = env.step(act_np)
         raw_reward = info.get("raw_reward", reward)
+        # Store RAW obs; normalization is applied at sample-time.
         buffer.add(obs, act_np, reward, next_obs, terminated)
         episode_reward += raw_reward
         episode_length += 1
@@ -392,7 +459,7 @@ def main(cfg: DictConfig):
         if step > cfg.start_steps and buffer.can_sample():
             start = time()
 
-            batch = buffer.sample(batch_size=cfg.buffer.batch_size * cfg.utd)
+            batch = buffer.sample(batch_size=cfg.buffer.batch_size * cfg.utd, obs_transform=obs_transform)
 
             t = max(0, int(step - cfg.start_steps))
 
@@ -489,6 +556,7 @@ def main(cfg: DictConfig):
                         critic=critic,
                     ),
                     key=eval_key,
+                    obs_transform=eval_obs_transform,
                 )
                 log.update(eval_results)
                 log.update({"eval/eval_time": time() - start})
@@ -498,8 +566,35 @@ def main(cfg: DictConfig):
                 if "eval/success_rate" in log:
                     tqdm.write(f"   Success Rate: {log['eval/success_rate']:.2%}")
                 tqdm.write("")
+
+                if video_env is not None:
+                    key, video_key = jax.random.split(key)
+                    frames, vid_return, vid_length = record_video(
+                        video_env=video_env,
+                        policy=partial(
+                            evaluate_policy,
+                            actor=actor,
+                            critic=critic,
+                        ),
+                        key=video_key,
+                        obs_transform=video_obs_transform,
+                    )
+                    log["results/video"] = wandb.Video(
+                        frames,
+                        fps=int(cfg.video_fps),
+                        format="mp4",
+                        caption=f"episode return={vid_return:.3f} / episode length={vid_length}",
+                    )
+                    tqdm.write(f"   Video: return={vid_return:.2f}, length={vid_length}")
+                    tqdm.write("")
             if log:
                 wandb.log(log, step=step)
+
+    if video_env is not None:
+        inner = video_env
+        while hasattr(inner, "env"):
+            inner = inner.env
+        inner.close()
 
 
 if __name__ == "__main__":

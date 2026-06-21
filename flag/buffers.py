@@ -64,17 +64,24 @@ class ReplayBuffer:
             self.ptr = 0
             self.is_full = True
 
-    def sample(self, batch_size: int | None = None) -> ReplayBatch:
+    def sample(self, batch_size: int | None = None, obs_transform=None) -> ReplayBatch:
         bs = batch_size if batch_size is not None else self.batch_size
         max_index = self.size if self.is_full else self.ptr
 
         indices = np.random.randint(0, max_index, size=bs)
 
+        obs = self.obs_buffer[indices]
+        next_obs = self.next_obs_buffer[indices]
+        # Buffer stores RAW obs; normalize at sample-time with current statistics.
+        if obs_transform is not None:
+            obs = obs_transform(obs)
+            next_obs = obs_transform(next_obs)
+
         batch = ReplayBatch(
-            obs=jnp.array(self.obs_buffer[indices]),
+            obs=jnp.array(obs),
             act=jnp.array(self.action_buffer[indices]),
             rwd=jnp.array(self.reward_buffer[indices]),
-            next_obs=jnp.array(self.next_obs_buffer[indices]),
+            next_obs=jnp.array(next_obs),
             done=jnp.array(self.done_buffer[indices]),
         )
         return batch

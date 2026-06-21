@@ -2,7 +2,7 @@
 # Run FLAG on a HumanoidBench task.
 #
 # Usage:
-#   ./run_flag.sh --env h1-walk-v0 [--seed 42] [--gpu 0] [extra hydra overrides...]
+#   ./run_flag.sh --env h1-walk-v0 [--seed 42] [--gpu 0] [--video] [extra hydra overrides...]
 #   ./run_flag.sh --env h1-walk-v0 --seed 0 21 42 63   # multiple seeds, run sequentially
 #
 # Supported envs: h1-walk-v0  h1-run-v0  h1-hurdle-v0  h1-maze-v0  h1-stair-v0
@@ -11,6 +11,7 @@
 #   ./run_flag.sh --env h1-walk-v0
 #   ./run_flag.sh --env h1-run-v0 --seed 1 --gpu 1
 #   ./run_flag.sh --env h1-walk-v0 --seed 0 21 42 63 84 105 126 147 168 189 --gpu 0
+#   ./run_flag.sh --env h1-walk-v0 --video --gpu 0
 #   ./run_flag.sh --env h1-maze-v0 total_steps=2000001
 #   ./run_flag.sh --env all --seed 0          # sequential run over all 5 tasks
 
@@ -20,6 +21,7 @@ set -euo pipefail
 ENV_ID=""
 SEEDS=()
 GPU=0
+VIDEO=false
 CONDA_ENV=humanoidbench
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -38,6 +40,7 @@ while [[ $# -gt 0 ]]; do
             done
             ;;
         --gpu)   GPU="$2";     shift 2 ;;
+        --video) VIDEO=true;   shift ;;
         *)       HYDRA_OVERRIDES+=("$1"); shift ;;
     esac
 done
@@ -48,9 +51,13 @@ fi
 
 if [[ -z "$ENV_ID" ]]; then
     echo "Error: --env is required." >&2
-    echo "Usage: $0 --env <env_id|all> [--seed N [N ...]] [--gpu N] [hydra overrides...]" >&2
+    echo "Usage: $0 --env <env_id|all> [--seed N [N ...]] [--gpu N] [--video] [hydra overrides...]" >&2
     echo "Valid envs: ${VALID_ENVS[*]}" >&2
     exit 1
+fi
+
+if [[ "$VIDEO" == true ]]; then
+    HYDRA_OVERRIDES+=("save_video=true")
 fi
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -63,19 +70,29 @@ run_one() {
     echo "  SEED: $seed"
     echo "  GPU : $GPU (physical)"
     echo "  CUDA_VISIBLE_DEVICES=$GPU"
-    echo "  EGL_DEVICE_ID=$GPU"
+    echo "  VIDEO: $VIDEO"
     echo "========================================================"
 
-    CUDA_VISIBLE_DEVICES="$GPU" \
-    NVIDIA_VISIBLE_DEVICES="$GPU" \
-    EGL_DEVICE_ID="$GPU" \
-    XLA_PYTHON_CLIENT_PREALLOCATE=false \
-    MUJOCO_GL=egl \
-    conda run --no-capture-output -n "$CONDA_ENV" \
-            python "$SCRIPT_DIR/train_flag.py" \
-                env_id="$env" \
-                seed="$seed" \
-                "${HYDRA_OVERRIDES[@]+"${HYDRA_OVERRIDES[@]}"}"
+    if [[ "$VIDEO" == true ]]; then
+        CUDA_VISIBLE_DEVICES="$GPU" \
+        MUJOCO_GL=egl \
+        MUJOCO_EGL_DEVICE_ID="$GPU" \
+        EGL_DEVICE_ID="$GPU" \
+        XLA_PYTHON_CLIENT_PREALLOCATE=false \
+        conda run --no-capture-output -n "$CONDA_ENV" \
+                python "$SCRIPT_DIR/train_flag.py" \
+                    env_id="$env" \
+                    seed="$seed" \
+                    "${HYDRA_OVERRIDES[@]+"${HYDRA_OVERRIDES[@]}"}"
+    else
+        CUDA_VISIBLE_DEVICES="$GPU" \
+        XLA_PYTHON_CLIENT_PREALLOCATE=false \
+        conda run --no-capture-output -n "$CONDA_ENV" \
+                python "$SCRIPT_DIR/train_flag.py" \
+                    env_id="$env" \
+                    seed="$seed" \
+                    "${HYDRA_OVERRIDES[@]+"${HYDRA_OVERRIDES[@]}"}"
+    fi
 }
 
 # ── dispatch ──────────────────────────────────────────────────────────────────
